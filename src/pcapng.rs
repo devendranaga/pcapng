@@ -99,7 +99,7 @@ pub struct pcapng {
     os              : Vec<u8>,
     application     : Vec<u8>,
     comment         : Vec<u8>,
-    link_type       : u32,
+    link_type       : u16,
     snaplen         : u32,
     ifname          : String,
     ts_resol        : u16,
@@ -198,14 +198,19 @@ impl pcapng {
                     return -1;
                 }
 
+                self.offset = 0;
+
+                let val_32 = self.get_u32();
+                if val_32 == self.shb_hdr.total_len {
+                    return 1;
+                }
+
                 if (self.pkt_buffer[0] == 0) &&
                    (self.pkt_buffer[1] == 0) &&
                    (self.pkt_buffer[2] == 0) &&
                    (self.pkt_buffer[3] == 0) {
                     return 0;
                 }
-
-                self.offset = 0;
 
                 option = self.get_u16();
                 option_len = self.get_u16();
@@ -264,8 +269,17 @@ impl pcapng {
                 return -1;
             }
 
-            self.link_type = self.get_u32();
+            self.link_type = self.get_u16();
+            self.offset += 2;
             self.snaplen = self.get_u32();
+
+            let val_32 = self.get_u32();
+            if val_32 == block_total_len + 8 {
+                println!("end of ISB with no options");
+                return 0;
+            } else {
+                self.offset -= 4;
+            }
             loop {
                 let opt_name = self.get_u16();
                 let opt_len = self.get_u16();
@@ -291,12 +305,10 @@ impl pcapng {
                     },
                     _ => (),
                 }
-                let mut remaining_len : u16 = 0;
                 if opt_len % 4 != 0 {
-                    remaining_len = (opt_len + 3) & !3;
+                   let remaining_len = (opt_len + 3) & !3;
+                    self.offset += (remaining_len - ((opt_len + 3) & !3)) as usize;
                 }
-                let pad = remaining_len - opt_len;
-                self.offset += pad as usize;
             }
         }
     }
@@ -399,20 +411,6 @@ impl pcapng {
     }
 
     fn parse_blocks(&mut self, read_callback : fn(epb : &mut enhanced_pkt_block)) -> isize {
-        unsafe {
-            self.offset = 0;
-            let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, 4 as usize);
-            if res != 4 {
-                println!("invalid read size\n");
-                return -1;
-            }
-
-            self.total_len = self.get_u32();
-            if self.shb_hdr.total_len != self.total_len {
-                println!("incorrectly formatted SHB\n");
-            }
-        }
-
         loop {
             unsafe {
                 self.offset = 0;
@@ -511,15 +509,28 @@ impl pcapng {
             self.shb_hdr.section_len = self.get_u64();
 
             // parse shb options
-            if self.parse_options() != 0 {
+            let res = self.parse_options();
+            println!("res {}", res);
+            if res == -1 {
                 println!("invalid options\n");
                 return -1;
-            }
+            } else if res == 0 { // has valid options, so read the length and match it
+                self.offset = 0;
+                let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, 4 as usize);
+                if res != 4 {
+                    println!("invalid read size\n");
+                    return -1;
+                }
+
+                self.total_len = self.get_u32();
+                if self.shb_hdr.total_len != self.total_len {
+                    println!("incorrectly formatted SHB\n");
+                }
+            } // value 1 means options are not there and length is already parsed out.
 
             // parse remaining blocks
-            self.parse_blocks(read_callback);
+            return self.parse_blocks(read_callback).try_into().unwrap();
         }
-        0
     }
 }
 
