@@ -203,6 +203,8 @@ impl pcapng {
                 let val_32 = self.get_u32();
                 if val_32 == self.shb_hdr.total_len {
                     return 1;
+                } else {
+                    self.offset -= 4;
                 }
 
                 if (self.pkt_buffer[0] == 0) &&
@@ -248,7 +250,7 @@ impl pcapng {
                         self.shb_opts |= SHB_OPT_COMMENT;
                     },
                     _ => {
-                        println!("cannot parse option {}", option);
+                        println!("cannot parse option {:04x}", option);
                         return -1;
                     }
                 }
@@ -275,11 +277,11 @@ impl pcapng {
 
             let val_32 = self.get_u32();
             if val_32 == block_total_len + 8 {
-                println!("end of ISB with no options");
                 return 0;
             } else {
                 self.offset -= 4;
             }
+
             loop {
                 let opt_name = self.get_u16();
                 let opt_len = self.get_u16();
@@ -303,11 +305,14 @@ impl pcapng {
                     SHB_IDB_OPT_OS => {
                         self.os_str = self.get_str(opt_len as usize);
                     },
-                    _ => (),
+                    _ => {
+                        println!("invalid or unknown opt_name {:04x} opt_len {:04x}", opt_name, opt_len);
+                        return -1;
+                    }
                 }
                 if opt_len % 4 != 0 {
                    let remaining_len = (opt_len + 3) & !3;
-                    self.offset += (remaining_len - ((opt_len + 3) & !3)) as usize;
+                    self.offset += (remaining_len - opt_len) as usize;
                 }
             }
         }
@@ -510,7 +515,6 @@ impl pcapng {
 
             // parse shb options
             let res = self.parse_options();
-            println!("res {}", res);
             if res == -1 {
                 println!("invalid options\n");
                 return -1;
