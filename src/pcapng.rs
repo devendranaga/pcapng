@@ -110,10 +110,10 @@ pub struct pcapng {
     shb_hdr         : pcapng_shb,
     pkt_buffer      : [u8; 4096],
     shb_opts        : u32,
-    hw              : Vec<u8>,
-    os              : Vec<u8>,
-    application     : Vec<u8>,
-    comment         : Vec<u8>,
+    hw              : String,
+    os              : String,
+    application     : String,
+    comment         : String,
     link_type       : u16,
     snaplen         : u32,
     ifname          : String,
@@ -134,10 +134,10 @@ impl pcapng {
             shb_hdr         : pcapng_shb::new(),
             pkt_buffer      : [0; 4096],
             shb_opts        : 0,
-            hw              : Vec::new(),
-            os              : Vec::new(),
-            application     : Vec::new(),
-            comment         : Vec::new(),
+            hw              : String::new(),
+            os              : String::new(),
+            application     : String::new(),
+            comment         : String::new(),
             link_type       : 0,
             snaplen         : 0,
             ifname          : String::new(),
@@ -251,19 +251,19 @@ impl pcapng {
 
                 match option {
                     SHB_OP_HW => {
-                        self.hw = self.pkt_buffer[0..original_option_len].to_vec();
+                        self.hw = self.get_str(original_option_len);
                         self.shb_opts |= SHB_OPT_HW;
                     },
                     SHB_OP_OS => {
-                        self.os = self.pkt_buffer[0..original_option_len].to_vec();
+                        self.os = self.get_str(original_option_len);
                         self.shb_opts |= SHB_OPT_OS;
                     },
                     SHB_OP_USER_APP => {
-                        self.application = self.pkt_buffer[0..original_option_len].to_vec();
+                        self.application = self.get_str(original_option_len);
                         self.shb_opts |= SHB_OPT_USER_APP;
                     },
                     SHB_OP_COMMENT => {
-                        self.comment = self.pkt_buffer[0..original_option_len].to_vec();
+                        self.comment = self.get_str(original_option_len);
                         self.shb_opts |= SHB_OPT_COMMENT;
                     },
                     _ => {
