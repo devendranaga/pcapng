@@ -1,4 +1,4 @@
-mod pcapng;
+pub mod pcapng;
 
 #[cfg(test)]
 mod tests {
@@ -15,7 +15,7 @@ mod tests {
     #[test]
     fn test_pcapng() {
         let mut p_handle = pcapng::pcapng::new();
-        let res = p_handle.open("test.pcapng".to_string(), read_callback);
+        let res = p_handle.parse("test.pcapng".to_string(), read_callback);
         println!("res {}", res);
     }
 }

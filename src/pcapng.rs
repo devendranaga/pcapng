@@ -43,16 +43,30 @@ impl pcapng_shb {
     }
 }
 
+/// Describes an enhanced packet block
 pub struct enhanced_pkt_block {
+    /// interface id
     pub intf_id         : u32,
+
+    /// timestamp high
     pub ts_high         : u32,
+
+    /// timestamp low
     pub ts_low          : u32,
+
+    /// captured length bytes
     pub captured_len    : u32,
+
+    /// original length bytes
     pub original_len    : u32,
+
+    /// packet data
     pub packet_data     : Vec<u8>,
 }
 
 impl enhanced_pkt_block {
+
+    /// Initialize the enhanced packet block structure
     pub fn new() -> Self {
         Self {
             intf_id         : 0,
@@ -89,6 +103,7 @@ impl intf_stats_block {
     }
 }
 
+/// Describes pcapng interface
 pub struct pcapng {
     handle          : i32,
     total_len       : u32,
@@ -110,6 +125,8 @@ pub struct pcapng {
 }
 
 impl pcapng {
+
+    /// Initialize the pcapng interface
     pub fn new() -> Self {
         Self {
             handle          : -1,
@@ -470,7 +487,27 @@ impl pcapng {
         }
     }
 
-    pub fn open(&mut self, filename : String, read_callback : fn(epb : &mut enhanced_pkt_block)) -> i32 {
+    /// Parse an entire pcapng file
+    ///
+    /// This function can return failure if an invalid pcapng block is encountered.
+    ///
+    /// # Example:
+    ///
+    /// ```
+    /// use pcapng::pcapng::enhanced_pkt_block;
+    ///
+    /// fn pcapng_read_callback(epb : &mut enhanced_pkt_block) {
+    ///     println!("-- Enahnced packet block --");
+    ///     println!("\t intf_index: {}", epb.intf_id);
+    ///     println!("\t captured_len: {}", epb.captured_len);
+    /// }
+    ///
+    /// let mut pcapng_handle = pcapng::pcapng::pcapng::new();
+    /// let res = pcapng_handle.parse("test.pcapng".to_string(), pcapng_read_callback);
+    ///
+    ///```
+    ///
+    pub fn parse(&mut self, filename : String, read_callback : fn(epb : &mut enhanced_pkt_block)) -> i32 {
         unsafe {
             self.handle = libc::open(filename.as_ptr() as *const i8, libc::O_RDONLY);
             if self.handle == -1 {
