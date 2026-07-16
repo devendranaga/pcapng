@@ -13,9 +13,9 @@ mod tests {
     }
 
     #[test]
-    fn test_pcapng() {
-        let mut p_handle = pcapng::pcapng::new();
-        let res = p_handle.parse("tests/test.pcapng".to_string(), read_callback);
+    fn test_pcapng_no_options() {
+        let mut p_handle = pcapng::pcapng_parser::new();
+        let res = p_handle.parse("tests/test_no_options.pcapng".to_string(), read_callback);
         if res != 0 {
             panic!("invalid pcapng file");
         }

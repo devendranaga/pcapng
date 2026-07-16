@@ -104,7 +104,7 @@ impl intf_stats_block {
 }
 
 /// Describes pcapng interface
-pub struct pcapng {
+pub struct pcapng_parser {
     handle          : i32,
     total_len       : u32,
     shb_hdr         : pcapng_shb,
@@ -124,7 +124,7 @@ pub struct pcapng {
     stats           : intf_stats_block,
 }
 
-impl pcapng {
+impl pcapng_parser {
 
     /// Initialize the pcapng interface
     pub fn new() -> Self {
@@ -502,7 +502,7 @@ impl pcapng {
     ///     println!("\t captured_len: {}", epb.captured_len);
     /// }
     ///
-    /// let mut pcapng_handle = pcapng::pcapng::pcapng::new();
+    /// let mut pcapng_handle = pcapng::pcapng::pcapng_parser::new();
     /// let res = pcapng_handle.parse("test.pcapng".to_string(), pcapng_read_callback);
     ///
     ///```
@@ -571,6 +571,14 @@ impl pcapng {
 
             // parse remaining blocks
             return self.parse_blocks(read_callback).try_into().unwrap();
+        }
+    }
+
+    ///
+    /// close the pcapng parser
+    pub fn close(&mut self) {
+        unsafe {
+            libc::close(self.handle);
         }
     }
 }
