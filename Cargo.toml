@@ -2,6 +2,12 @@
 name = "pcapng"
 version = "0.1.0"
 edition = "2021"
+description = "initial pcapng source"
+license = "MIT"
+repository = "https://github.com/devendranaga/pcapng"
+readme = "README.md"
+keywords = ["utility", "parser", "pcapng"]
+categories = ["development-tools"]
 
 [lib]
 name = "pcapng"
