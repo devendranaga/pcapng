@@ -12,6 +12,7 @@ const SHB_OP_OS         : u16 = 3;
 const SHB_OP_USER_APP   : u16 = 4;
 
 const SHB_INTF_DESC_BLOCK   : u32 = 1;
+const SHB_SIMPLE_PKT_BLOCK  : u32 = 3;
 const SHB_INTF_STATS_BLOCK  : u32 = 5;
 const SHB_ENH_PKT_BLOCK     : u32 = 6;
 
@@ -73,6 +74,20 @@ impl enhanced_pkt_block {
             ts_high         : 0,
             ts_low          : 0,
             captured_len    : 0,
+            original_len    : 0,
+            packet_data     : Vec::new(),
+        }
+    }
+}
+
+pub struct simple_pkt_block {
+    pub original_len    : u32,
+    pub packet_data     : Vec<u8>,
+}
+
+impl simple_pkt_block {
+    pub fn new() -> Self {
+        Self {
             original_len    : 0,
             packet_data     : Vec::new(),
         }
@@ -477,8 +492,37 @@ impl pcapng_parser {
         }
     }
 
+    fn parse_simple_pkt_block(&mut self,
+                              spb : &mut simple_pkt_block,
+                              block_total_len : u32) -> isize {
+        unsafe {
+            let res = libc::read(self.handle,
+                                 self.pkt_buffer.as_ptr()
+                                    as *mut libc::c_void,
+                                 block_total_len as usize);
+            if (res == 0) || (res != block_total_len as isize) {
+                dbg!("pcapng cut short in the middle or invalid pcapng");
+                return -1;
+            }
+
+            self.offset = 0;
+
+            spb.original_len = self.get_u32();
+            spb.packet_data.copy_from_slice(
+                            &self.pkt_buffer[self.offset
+                                             ..self.offset + spb.original_len as usize]);
+            let val_32 = self.get_u32();
+            if val_32 != block_total_len + 8 {
+                dbg!("spb_len {} != block_total_len {}", val_32, block_total_len);
+                return -1;
+            }
+        }
+        0
+    }
+
     fn parse_blocks(&mut self,
-                    read_callback : fn(epb : &mut enhanced_pkt_block)) -> isize {
+                    read_epb_callback : fn(epb : &mut enhanced_pkt_block),
+                    read_spb_callback : fn(spb : &mut simple_pkt_block)) -> isize {
         loop {
             unsafe {
                 self.offset = 0;
@@ -519,7 +563,7 @@ impl pcapng_parser {
                             dbg!("invalid ENH block");
                             return res;
                         }
-                        read_callback(&mut epb);
+                        read_epb_callback(&mut epb);
                     },
                     SHB_INTF_STATS_BLOCK => {
                         res = self.parse_intf_stats_block(block_total_len - 8);
@@ -527,7 +571,19 @@ impl pcapng_parser {
                             dbg!("invalid ISB block");
                             return res;
                         }
-                    }
+                    },
+                    // untested
+                    SHB_SIMPLE_PKT_BLOCK => {
+                        let mut spb = simple_pkt_block::new();
+
+                        res = self.parse_simple_pkt_block(&mut spb,
+                                                          block_total_len - 8);
+                        if res != 0 {
+                            dbg!("Invalid SPB block");
+                            return res;
+                        }
+                        read_spb_callback(&mut spb);
+                    },
                     _ => {
                         dbg!("unknown parser block {}", block_name);
                         return -1;
@@ -545,21 +601,31 @@ impl pcapng_parser {
     ///
     /// ```
     /// use pcapng::pcapng::enhanced_pkt_block;
+    /// use pcapng::pcapng::simple_pkt_block;
     ///
-    /// fn pcapng_read_callback(epb : &mut enhanced_pkt_block) {
+    /// fn pcapng_read_epb_callback(epb : &mut enhanced_pkt_block) {
     ///     println!("-- Enahnced packet block --");
     ///     println!("\t intf_index: {}", epb.intf_id);
     ///     println!("\t captured_len: {}", epb.captured_len);
     /// }
     ///
+    /// fn pcapng_read_spb_callback(spb : &mut simple_pkt_block) {
+    ///     println!("-- Simple packet block --");
+    ///     println!("\t original_len : {}", spb.original_len);
+    ///     println!("\t packet_len: {}", spb.packet_data.len());
+    /// }
+    ///
     /// let mut pcapng_handle = pcapng::pcapng::pcapng_parser::new();
-    /// let res = pcapng_handle.parse("test.pcapng".to_string(), pcapng_read_callback);
+    /// let res = pcapng_handle.parse("test.pcapng".to_string(),
+    ///                               pcapng_read_epb_callback,
+    ///                               pcapng_read_spb_callback);
     ///
     ///```
     ///
     pub fn parse(&mut self,
                  filename : String,
-                 read_callback : fn(epb : &mut enhanced_pkt_block)) -> i32 {
+                 read_epb_callback : fn(epb : &mut enhanced_pkt_block),
+                 read_spb_callback : fn(spb : &mut simple_pkt_block)) -> i32 {
         unsafe {
             self.handle = libc::open(filename.as_ptr() as *const i8, libc::O_RDONLY);
             if self.handle == -1 {
@@ -624,7 +690,8 @@ impl pcapng_parser {
             } // value 1 means options are not there and length is already parsed out.
 
             // parse remaining blocks
-            return self.parse_blocks(read_callback).try_into().unwrap();
+            return self.parse_blocks(read_epb_callback,
+                                     read_spb_callback).try_into().unwrap();
         }
     }
 
