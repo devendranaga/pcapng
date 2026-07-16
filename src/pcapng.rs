@@ -117,6 +117,9 @@ pub struct pcapng_parser {
     link_type       : u16,
     snaplen         : u32,
     ifname          : String,
+    ifmacaddr       : [u8; 6],
+    ifeuiaddr       : [u8; 8],
+    ifspeed         : u64,
     ts_resol        : u16,
     os_str          : String,
     big_endian      : bool,
@@ -141,6 +144,9 @@ impl pcapng_parser {
             link_type       : 0,
             snaplen         : 0,
             ifname          : String::new(),
+            ifmacaddr       : [0; 6],
+            ifeuiaddr       : [0; 8],
+            ifspeed         : 0,
             ts_resol        : 0,
             os_str          : String::new(),
             big_endian      : false,
@@ -182,7 +188,8 @@ impl pcapng_parser {
     }
 
     fn get_str(&mut self, len : usize) -> String {
-        let str_val = String::from_utf8(self.pkt_buffer[self.offset..self.offset + len].to_vec()).unwrap();
+        let str_val = String::from_utf8(self.pkt_buffer[self.offset
+                                        ..self.offset + len].to_vec()).unwrap();
         self.offset += len;
 
         return str_val;
@@ -209,9 +216,12 @@ impl pcapng_parser {
 
         loop {
             unsafe {
-                let mut res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, 4);
+                let mut res = libc::read(self.handle,
+                                         self.pkt_buffer.as_ptr()
+                                                as *mut libc::c_void,
+                                         4);
                 if res != 4 {
-                    println!("invalid read length {}", res);
+                    dbg!("invalid read length {}", res);
                     return -1;
                 }
 
@@ -243,9 +253,11 @@ impl pcapng_parser {
                 self.offset = 0;
 
                 // read including pad bytes which added afterwards
-                res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, option_len as usize);
+                res = libc::read(self.handle,
+                                 self.pkt_buffer.as_ptr() as *mut libc::c_void,
+                                 option_len as usize);
                 if res != option_len.try_into().unwrap() {
-                    println!("invalid read length {}", res);
+                    dbg!("invalid read length {}", res);
                     return -1;
                 }
 
@@ -267,7 +279,7 @@ impl pcapng_parser {
                         self.shb_opts |= SHB_OPT_COMMENT;
                     },
                     _ => {
-                        println!("cannot parse option {:04x}", option);
+                        dbg!("cannot parse option {:04x}", option);
                         return -1;
                     }
                 }
@@ -276,15 +288,20 @@ impl pcapng_parser {
     }
 
     fn parse_intf_desc_block(&mut self, block_total_len : u32) -> isize {
-        const SHB_IDB_OPT_IFNAME : u16 = 2;
-        const SHB_IDB_OPT_TSRESOL : u16 = 9;
-        const SHB_IDB_OPT_OS : u16 = 12;
+        const SHB_IDB_OPT_IFNAME        : u16 = 2;
+        const SHB_IDB_OPT_IF_MACADDR    : u16 = 6;
+        const SHB_IDB_OPT_IF_EUIADDR    : u16 = 7;
+        const SHB_IDB_OPT_IF_SPEED      : u16 = 8;
+        const SHB_IDB_OPT_TSRESOL       : u16 = 9;
+        const SHB_IDB_OPT_OS            : u16 = 12;
 
         unsafe {
             self.offset = 0;
-            let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, block_total_len as usize);
+            let res = libc::read(self.handle,
+                                 self.pkt_buffer.as_ptr() as *mut libc::c_void,
+                                 block_total_len as usize);
             if res != block_total_len as isize {
-                println!("invalid read length");
+                dbg!("invalid read length");
                 return -1;
             }
 
@@ -306,7 +323,8 @@ impl pcapng_parser {
                 if opt_name == 0 && opt_len == 0 {
                     let block_bytes = self.get_u32();
                     if block_total_len + 8 != block_bytes {
-                        println!("block total len {} != block end bytes {}", block_total_len, block_bytes);
+                        dbg!("block total len {} != block end bytes {}",
+                             block_total_len, block_bytes);
                         return -1;
                     }
                     return 0;
@@ -322,8 +340,24 @@ impl pcapng_parser {
                     SHB_IDB_OPT_OS => {
                         self.os_str = self.get_str(opt_len as usize);
                     },
+                    // untested
+                    SHB_IDB_OPT_IF_MACADDR => {
+                        self.ifmacaddr.copy_from_slice(
+                                    &self.pkt_buffer[self.offset
+                                                     ..self.offset + 6]);
+                    },
+                    // untested
+                    SHB_IDB_OPT_IF_EUIADDR => {
+                        self.ifeuiaddr.copy_from_slice(
+                                    &self.pkt_buffer[self.offset
+                                                     ..self.offset + 8]);
+                    },
+                    SHB_IDB_OPT_IF_SPEED => {
+                        self.ifspeed = self.get_u64();
+                    },
                     _ => {
-                        println!("invalid or unknown opt_name {:04x} opt_len {:04x}", opt_name, opt_len);
+                        dbg!("invalid or unknown opt_name {:04x} opt_len {:04x}",
+                             opt_name, opt_len);
                         return -1;
                     }
                 }
@@ -335,12 +369,16 @@ impl pcapng_parser {
         }
     }
 
-    fn parse_enhanced_pkt_block(&mut self, epb : &mut enhanced_pkt_block, block_total_len : u32) -> isize {
+    fn parse_enhanced_pkt_block(&mut self,
+                                epb : &mut enhanced_pkt_block,
+                                block_total_len : u32) -> isize {
         unsafe {
             self.offset = 0;
-            let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, block_total_len as usize);
+            let res = libc::read(self.handle,
+                                 self.pkt_buffer.as_ptr() as *mut libc::c_void,
+                                 block_total_len as usize);
             if res != block_total_len as isize {
-                println!("invalid enhanced packet block");
+                dbg!("invalid enhanced packet block");
                 return res;
             }
 
@@ -350,7 +388,10 @@ impl pcapng_parser {
             epb.captured_len    = self.get_u32();
             epb.original_len    = self.get_u32();
 
-            epb.packet_data.extend_from_slice(&self.pkt_buffer[self.offset..self.offset + epb.captured_len as usize]);
+            epb.packet_data.extend_from_slice(
+                                &self.pkt_buffer[self.offset
+                                                 ..self.offset + epb.captured_len
+                                                    as usize]);
 
             self.offset += epb.captured_len as usize;
             let pad;
@@ -362,7 +403,7 @@ impl pcapng_parser {
 
             let block_bytes = self.get_u32();
             if block_total_len + 8 != block_bytes {
-                println!("EPB end length {} does not match with set EPB length {}",
+                dbg!("EPB end length {} does not match with set EPB length {}",
                                 block_bytes, block_total_len);
                 return -1;
             }
@@ -379,9 +420,12 @@ impl pcapng_parser {
 
         unsafe {
             self.offset = 0;
-            let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, block_total_len as usize);
+            let res = libc::read(self.handle,
+                                 self.pkt_buffer.as_ptr()
+                                    as *mut libc::c_void, block_total_len
+                                    as usize);
             if res != block_total_len as isize {
-                println!("invalid read length {}", res);
+                dbg!("invalid read length {}", res);
                 return res;
             }
 
@@ -397,7 +441,8 @@ impl pcapng_parser {
 
                     let block_bytes = self.get_u32();
                     if block_total_len + 8 != block_bytes {
-                        println!("block_total_len {} != block_bytes {}", block_total_len, block_bytes);
+                        dbg!("block_total_len {} != block_bytes {}",
+                             block_total_len, block_bytes);
                         return -1;
                     }
                     return 0;
@@ -420,7 +465,7 @@ impl pcapng_parser {
                         self.stats.pkts_dropped = self.get_u64();
                     },
                     _ => {
-                        println!("Invalid ISB option {}", option_type);
+                        dbg!("Invalid ISB option {}", option_type);
                         return -1;
                     }
                 }
@@ -432,17 +477,20 @@ impl pcapng_parser {
         }
     }
 
-    fn parse_blocks(&mut self, read_callback : fn(epb : &mut enhanced_pkt_block)) -> isize {
+    fn parse_blocks(&mut self,
+                    read_callback : fn(epb : &mut enhanced_pkt_block)) -> isize {
         loop {
             unsafe {
                 self.offset = 0;
 
-                let mut res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, 8 as usize);
+                let mut res = libc::read(self.handle,
+                                         self.pkt_buffer.as_ptr()
+                                            as *mut libc::c_void,
+                                         8 as usize);
                 if res == 0 {
-                    println!("finished reading");
                     return 0;
                 } else if res != 8 {
-                    println!("invalid read length of block data");
+                    dbg!("invalid read length of block data");
                     return -1;
                 }
 
@@ -458,16 +506,17 @@ impl pcapng_parser {
                     SHB_INTF_DESC_BLOCK => {
                         res = self.parse_intf_desc_block(block_total_len - 8);
                         if res != 0 {
-                            println!("invalid IDB block");
+                            dbg!("invalid IDB block");
                             return res;
                         }
                     },
                     SHB_ENH_PKT_BLOCK => {
-                        let mut epb : enhanced_pkt_block = enhanced_pkt_block::new();
+                        let mut epb = enhanced_pkt_block::new();
 
-                        res = self.parse_enhanced_pkt_block(&mut epb, block_total_len - 8);
+                        res = self.parse_enhanced_pkt_block(&mut epb,
+                                                            block_total_len - 8);
                         if res != 0 {
-                            println!("invalid ENH block");
+                            dbg!("invalid ENH block");
                             return res;
                         }
                         read_callback(&mut epb);
@@ -475,11 +524,12 @@ impl pcapng_parser {
                     SHB_INTF_STATS_BLOCK => {
                         res = self.parse_intf_stats_block(block_total_len - 8);
                         if res != 0 {
-                            println!("invalid ISB block");
+                            dbg!("invalid ISB block");
+                            return res;
                         }
                     }
                     _ => {
-                        println!("unknown parser block {}", block_name);
+                        dbg!("unknown parser block {}", block_name);
                         return -1;
                     }
                 }
@@ -507,11 +557,13 @@ impl pcapng_parser {
     ///
     ///```
     ///
-    pub fn parse(&mut self, filename : String, read_callback : fn(epb : &mut enhanced_pkt_block)) -> i32 {
+    pub fn parse(&mut self,
+                 filename : String,
+                 read_callback : fn(epb : &mut enhanced_pkt_block)) -> i32 {
         unsafe {
             self.handle = libc::open(filename.as_ptr() as *const i8, libc::O_RDONLY);
             if self.handle == -1 {
-                println!("failed to open {}", filename);
+                dbg!("failed to open {}", filename);
                 return -1;
             }
 
@@ -520,13 +572,13 @@ impl pcapng_parser {
                                  self.pkt_buffer.as_ptr()
                                     as *mut libc::c_void, 24);
             if res != 24 {
-                println!("invalid read length {}", res);
+                dbg!("invalid read length {}", res);
                 return -1;
             }
 
             // validate section header length
             if self.pkt_buffer[..4] != SHB_BLOCK_MAGIC[..4] {
-                println!("invalid section header magic");
+                dbg!("invalid section header magic");
                 return -1;
             }
 
@@ -536,7 +588,7 @@ impl pcapng_parser {
             } else if self.pkt_buffer[8..12] == SHB_BYTE_ORDER_MAGIC_LE[..4] {
                 self.big_endian = false;
             } else {
-                println!("invalid byte order or unknown byte magic");
+                dbg!("invalid byte order or unknown byte magic");
                 return -1;
             }
 
@@ -553,19 +605,21 @@ impl pcapng_parser {
             // parse shb options
             let res = self.parse_options();
             if res == -1 {
-                println!("invalid options\n");
+                dbg!("invalid options\n");
                 return -1;
             } else if res == 0 { // has valid options, so read the length and match it
                 self.offset = 0;
-                let res = libc::read(self.handle, self.pkt_buffer.as_ptr() as *mut libc::c_void, 4 as usize);
+                let res = libc::read(self.handle,
+                                     self.pkt_buffer.as_ptr() as *mut libc::c_void,
+                                     4 as usize);
                 if res != 4 {
-                    println!("invalid read size\n");
+                    dbg!("invalid read size\n");
                     return -1;
                 }
 
                 self.total_len = self.get_u32();
                 if self.shb_hdr.total_len != self.total_len {
-                    println!("incorrectly formatted SHB\n");
+                    dbg!("incorrectly formatted SHB\n");
                 }
             } // value 1 means options are not there and length is already parsed out.
 

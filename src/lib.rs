@@ -19,5 +19,6 @@ mod tests {
         if res != 0 {
             panic!("invalid pcapng file");
         }
+        p_handle.close();
     }
 }
